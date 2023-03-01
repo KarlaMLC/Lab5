@@ -1,0 +1,278 @@
+/* Archivo: LAB5.S
+   Dispositivo: PIC16F887
+   Autor: Karla López 
+   Compilador: pic-as (v2.30), MPLABX V5.40
+     
+   Programa: Contadores unidades, decenas y centenas 
+   Hardware: LEDs, Display y Pushbuttons
+     
+   Creado: 23/02/2023
+   Ultima modificación: 27/02/2023  
+ */
+
+;---------------------------------------------------
+PROCESSOR 16F887
+#include <xc.inc>
+
+;configuration word 1
+ CONFIG FOSC=INTRC_NOCLKOUT // Oscillador interno salidas
+ CONFIG WDTE = OFF // WDT disabled (reinicio repetitivo del pic)
+ CONFIG PWRTE=OFF // PWRT enabled (espera de 72ms al iniciar)
+ CONFIG MCLRE=OFF // El ping de MCLR se utiliza como I/o
+ CONFIG CP=OFF	// Sin proteccion de codigo
+ CONFIG CPD =OFF  // Sin proteccion de datos
+ 
+ CONFIG BOREN=OFF // Sin reinicio cuando el voltaje de alimentacion baja de 4v
+ CONFIG IESO=OFF // Reinicio sin cambio de reloj de interno a externo
+ CONFIG FCMEN=OFF // Cambio de reloj externo a interno en caso de fallo
+ CONFIG LVP=OFF // Programacion en bajo voltaje permitida
+ 
+ ;configuration word 2
+ CONFIG WRT=OFF // Proteccion de autoescritura por el programa desactivada
+ CONFIG BOR4V=BOR40V // Reinicio abajo de 4V, (BOR21V=2.1V)
+ 
+re_timer0 macro
+    BANKSEL TMR0    ;banco 0
+    MOVLW 100  
+    MOVWF TMR0	;cargar valor a timer0
+    BCF T0IF   ;limpiar overflow de timer0
+    endm     
+ 
+ PSECT udata_bank0 ;common memory
+    wTEMPORAL: DS 1
+    StatusTemporal: DS 1
+    CONT: DS 1 
+    FLAGS: DS 1
+    ValDisplay: DS 3
+    UNI: DS 1
+    DECE: DS 1 
+    CENT: DS 1
+;-------------Vector reset------------------------------------
+PSECT resVect, Class=CODE, abs, delta=2
+ORG 00h ;    posicion 000h para el reset
+    
+resetVec:
+    PAGESEL main
+    goto main
+
+;-------------Vector tabla------------------------------------
+PSECT code,delta=2,abs
+ ORG 100h   
+ tabla:
+    clrf PCLATH
+    bsf PCLATH,0
+    andlw 0x0f
+    addwf PCL
+    retlw 00111111B	    ;0
+    retlw 00000110B	    ;1
+    retlw 01011011B	    ;2
+    retlw 01001111B	    ;3
+    retlw 01100110B	    ;4
+    retlw 01101101B	    ;5
+    retlw 01111101B	    ;6
+    retlw 00000111B	    ;7
+    retlw 01111111B	    ;8
+    retlw 01101111B	    ;9
+    retlw 01110111B	    ;A
+    retlw 01111100B	    ;B
+    retlw 00111001B	    ;C
+    retlw 01011110B	    ;D
+    retlw 01111001B	    ;E
+    retlw 01110001B	    ;F
+
+;------------Vector interrupcion-----------------------------
+ORG 04h ; posicion int_tmr0
+    
+push:
+    movwf wTEMPORAL     ; Se guarda el valor de W en wTemporal
+    swapf STATUS, W     ; Se intercambia el contenido de STATUS con el de W
+    movwf StatusTemporal    ; Se guarda el valor de STATUS en StatusTemp
+    return              ; Retorna a la rutina principal
+
+isr:
+    btfsc T0IF          ; Verifica el valor, Salta si la bandera de interrupción de TMR0 no está en 1
+    call int_tmr0       ; Llama a la subrutina int_tmr0
+    btfsc RBIF          ; verifica el valor, Salta si la bandera de interrupción del Puerto B no está en 1
+    call int_IOCB       ; Llama a la subrutina int_IOCB
+    return              ; Retorna a la rutina principal
+
+pop:
+    swapf StatusTemporal, W ; Se intercambia el contenido de StatusTemp con el de W
+    movwf STATUS        ; Se restaura el valor de STATUS
+    swapf wTEMPORAL, F  ; Se intercambia el contenido de wTemporal con el de F
+    swapf wTEMPORAL, W  ; Se intercambia el contenido de wTemporal con el de W
+    retfie              
+    
+    
+;-------------interrupcion-boton----------
+    
+ int_IOCB:
+    banksel PORTB   ;banco PuertoB
+    btfss PORTB, 0  ; verifica si el valor en pin 0 es 1 
+    incf PORTA	    ; no, incrementa PORTA
+    btfss PORTB,1   ; verifica si el valor en pin 1 es 1 
+    decf PORTA	    ; no, PORTA
+    bcf RBIF	    ; limpia la bandera interrupcion
+    return
+    
+;-------------------interrupcion-timer0----------------------------------------   
+    
+ int_tmr0:
+    call selec_display ;llama función para seleccionar display, hace que cada vez que se active cambie de display
+    re_timer0 ;resetea timer
+    return
+   
+selec_display:
+    bcf PORTD, 0 ;limpia puertos
+    bcf PORTD, 1
+    bcf PORTD, 2
+    btfsc FLAGS, 1
+    goto disp2
+    btfsc FLAGS, 0 ;verifica si la bandera 0 esta activa 
+    goto disp0 ;no, va a display 0
+    goto disp1 ;si, va a display 1
+    return   
+
+disp0:
+    movf ValDisplay, W ;mueve el valor de ValDisplay a mostrar a PORTC
+    movwf PORTC
+    bsf PORTD, 1 ;Activa pin 1, donde está el otro display y limpia y setea FLAGS para que vaya a display 1 en siguiente interrupción
+    bcf FLAGS, 0
+    bsf FLAGS, 1
+    return
+    
+disp1:
+    movf ValDisplay+1, W ;mueve el valor de ValDisplay+1 a mostrar a PORTC
+    movwf PORTC
+    bsf PORTD, 0 ;Activa pin 0, donde está el otro display y limpia bandera para que vaya a display 2 en siguiente interrupción
+    bsf FLAGS, 0
+    return
+    
+disp2:
+    movf ValDisplay+2, W ;mueve el valor de ValDisplay a mostrar a PORTC
+    movwf PORTC
+    bsf PORTD, 2 ;Activa pin 2, donde está el otro display y limpia y setea FLAGS para que vaya a display 0 en siguiente interrupción
+    bcf FLAGS, 0
+    bcf FLAGS, 1
+    return
+ ;----------Configuracion--------------------------------------
+ main:
+    call puertos ; Config puertos
+    call reloj	; Config reloj 
+    call IOCBconf	; Congig interrupciones de IOCB
+    call conf_tmr0_flags	; COnfig interrupciones de timer0
+    call timer0	;config timer0
+    banksel PORTA 
+;--------------------------------------------------------------
+    
+loop:
+    movf PORTA, W
+    movwf CONT ;mueve valor de PORTA a CONT
+    call DISPLAY
+    clrf UNI
+    clrf DECE
+    clrf CENT
+    call convertir_CENT
+    call convertir_DECE
+    call convertir_UNI
+    goto loop
+    
+IOCBconf:
+    banksel TRISA ;se mueve a banco que contiene TRISA
+    bsf IOCB, 0 
+    bsf IOCB, 1	; pines 0 y 1 on change
+    banksel PORTA ;se mueve al banco que contiene PORTA
+    movf PORTB, W ;mueve valor de PORTB a W
+    bcf RBIF ;limpia bandera
+    return
+    
+ puertos:
+    banksel ANSEL; banco 11
+    clrf ANSEL
+    clrf ANSELH  ; pines digitales
+    banksel TRISA ; banco 01
+    clrf TRISA ; A, C y D salidas
+    clrf TRISD
+    clrf TRISC
+    bsf TRISB0
+    bsf TRISB1 ;PORTB pines 1 y 0 entradas, botones
+    bcf OPTION_REG, 7 ; PULL-UPS
+    banksel PORTA ; banco 00
+    clrf PORTA ; reset PORTA, PORTC y PORTD
+    clrf PORTC
+    clrf PORTD
+    clrf FLAGS ;limpia FLAGS para mover de display
+    return   
+    
+conf_tmr0_flags:
+    BSF GIE; intcon
+    BSF RBIE
+    BCF RBIF
+    BSF T0IE ;inicializa bandera TOIE de TMR0
+    BCF T0IF; limpia bandera TOIF de TMR0
+    return 
+
+reloj:
+    banksel OSCCON ; oscilador en 250khz
+    bcf	    IRCF2
+    bsf	    IRCF1
+    bcf	    IRCF0
+    bsf	    SCS
+    return
+    
+timer0:
+    banksel OPTION_REG 
+    BCF T0CS
+    BCF PSA
+    BCF PS2
+    BCF PS1
+    BCF PS0	    ; prescaler 1:4
+
+    re_timer0 ; sub rutina reset timer0
+    return 
+    
+DISPLAY:
+    movf CENT, W	;manda el valor de CENT a la tabla
+    call tabla
+    movwf ValDisplay+2	;lo mueve a ValDisplay+2 para mostrar en display 2
+    movf DECE, W	;manda el valor de DECE a la tabla
+    call tabla
+    movwf ValDisplay+1	;lo mueve a ValDisplay+1 para mostrar en display 1
+    movf UNI, W	;manda el valor de UNI a la tabla
+    call tabla
+    movwf ValDisplay	;lo mueve a ValDisplay para mostrar en display 0
+    return
+
+convertir_CENT:
+    movlw 100	    ;mueve 100 para verificar si llego a multiplo de F
+    subwf CONT, F ; se substrae a CONT
+    incf CENT   ;se incrementa DECE
+    btfsc STATUS, 0 ; verifica si el valor es 0
+    goto $-4	    ;no, se repite. Se para guardando la cantidad de CENT que hay actualmente
+    decf CENT    ;si, decrementa DECE
+    movlw 100	    ;suma 100 a CONT
+    addwf CONT, F
+    return   
+    
+convertir_DECE:
+    movlw 10	    ;mueve 10 para verificar si llego a multiplo de F
+    subwf CONT, F ; se substrae a CONT
+    incf DECE    ;se incrementa DECE
+    btfsc STATUS, 0 ;verifica si el valor es 0
+    goto $-4	    ;no, se repite. Se para guardando la cantidad de DECE que hay actualmente
+    decf DECE    ;si, decrementa DECE
+    movlw 10	    ;suma 10 a CONT
+    addwf CONT, F
+    return
+    
+convertir_UNI:
+    movlw 1	    
+    subwf CONT, F ; se substrae 1 a UNI
+    incf UNI   ;se incrementa UNI
+    btfsc STATUS, 0 ;verifica si el valor es 0
+    goto $-4	    ;no, se repite. Se para guardando la cantidad de UNI que hay actualmente
+    decf UNI   ;si, dectementa UNI
+    movlw 1	    
+    addwf CONT, F ;suma uno a CONT
+    return
+END
